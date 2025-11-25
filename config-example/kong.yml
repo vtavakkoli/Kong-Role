@@ -1,0 +1,96 @@
+﻿_format_version: "3.0"
+_comment: "DB-less Kong config for IAM Lab: Keycloak OIDC + ACL"
+
+services:
+  - name: lob1-service
+    url: http://lob1:8080
+    plugins:
+      - name: oidc-role
+        config:
+          discovery:     http://10.0.0.50:9100/realms/IAM_Lab_Realm/.well-known/openid-configuration
+          introspection_endpoint: http://keycloak:8080/realms/IAM_Lab_Realm/protocol/openid-connect/token/introspect
+          client_id:     kong
+          client_secret: S3cr3tKong
+          scope:         openid
+          ssl_verify:    "false"
+          bearer_only:   "yes"
+          consumer_claim:    realm_access.roles
+          consumer_by:       custom_id
+          use_jwks: "yes"
+
+  - name: lob2-service
+    url: http://lob2:8080
+    plugins:
+      - name: oidc-role
+        config:
+          discovery:     http://10.0.0.50:9100/realms/IAM_Lab_Realm/.well-known/openid-configuration
+          introspection_endpoint: http://keycloak:8080/realms/IAM_Lab_Realm/protocol/openid-connect/token/introspect
+          client_id:     kong
+          client_secret: S3cr3tKong
+          scope:         openid
+          ssl_verify:    "false"
+          bearer_only:   "yes"
+          consumer_claim:    realm_access.roles
+          consumer_by:       custom_id
+          use_jwks: "yes"
+
+
+  - name: lob3-service
+    url: http://lob3:8080
+    plugins:
+      - name: oidc-role
+        config:
+          discovery:     http://10.0.0.50:9100/realms/IAM_Lab_Realm/.well-known/openid-configuration
+          introspection_endpoint: http://keycloak:8080/realms/IAM_Lab_Realm/protocol/openid-connect/token/introspect
+          client_id:     kong
+          client_secret: S3cr3tKong
+          scope:         openid
+          ssl_verify:    "false"
+          bearer_only:   "yes"
+          consumer_claim:    realm_access.roles
+          consumer_by:       custom_id
+          use_jwks: "yes"
+
+routes:
+  - name: lob1-route
+    service: lob1-service
+    paths: [ /lob1 ]
+    plugins:
+      - name: acl
+        config:
+          allow: 
+            - lob1-user
+
+  - name: lob2-route
+    service: lob2-service
+    paths: [ /lob2 ]
+    plugins:
+      - name: acl
+        config:
+          allow: 
+            - lob2-user
+
+  - name: lob3-route
+    service: lob3-service
+    paths: [ /lob3 ]
+    plugins:
+      - name: acl
+        config:
+          allow: 
+            - lob3-user
+
+consumers:
+  - username: role-lob1
+    custom_id: lob1-user
+    acls:
+      - group: lob1-user
+
+  - username: role-lob2
+    custom_id: lob2-user
+    acls:
+      - group: lob2-user
+
+  - username: role-lob3
+    custom_id: lob3-user
+    acls:
+      - group: lob3-user
