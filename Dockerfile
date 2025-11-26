@@ -4,7 +4,7 @@ USER root
 
 # Install required tools and build dependencies
 RUN apt-get update && \
-    apt-get install -y git unzip luarocks curl gcc libssl-dev make && \
+    apt-get install -y luarocks && \
     rm -rf /var/lib/apt/lists/*
 
 # Install kong-oidc
