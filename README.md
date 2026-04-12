@@ -1,214 +1,216 @@
 # Kong OIDC Role Plugin
 
-This repository contains a custom **Kong plugin** that makes it easy to use **Keycloak realm roles** (or any `roles`-like claim) for API access control.
+A lightweight, reusable Kong custom plugin for role-based authorization using OIDC/JWT claims (with Keycloak-friendly defaults).
 
-The plugin is **agnostic to the Kong database mode** – it works both with:
+This repository packages a Kong plugin named `oidc-role` that reads identity claims from validated tokens and maps them to Kong consumer/ACL authorization decisions.
 
-- **DB-less** Kong (declarative `kong.yml` configuration)
-- **DB mode** (Postgres) where configuration is stored in the database and managed via the Admin API / Kong Manager / `deck`
+> **Author:** Written by **Vahid Tavakkoli (2026)**.
 
-The configs and Docker files in this repo are provided as **examples** to quickly try the plugin in a DB-less setup, but the plugin itself can be used in either mode.
+## Project Overview
 
----
+`oidc-role` is intended to be used **after authentication** (for example, after `kong-oidc`, OpenID Connect introspection, or JWT validation).
 
-## Features
+The plugin focuses on authorization and identity mapping by:
+- validating/introspecting bearer tokens (depending on config),
+- extracting claim values (including nested paths),
+- optionally mapping claims to Kong consumers,
+- injecting identity headers/groups for upstream services,
+- enabling Kong ACL-based access control per route/service.
 
-- ✅ Role-based access control (RBAC) for Kong routes/services based on OIDC / JWT claims
-- ✅ Works with Keycloak **realm roles** (e.g. `realm_access.roles`) or any array-like claim
-- ✅ Clear HTTP responses when roles are missing (e.g. `403 Forbidden`)
-- ✅ Can be used in **DB-less** and **DB** deployments
-- ✅ Small, self-contained Lua plugin (designed to sit on top of an existing OIDC/JWT validation plugin)
+## Purpose
 
----
+This project enables centralized API authorization in Kong when your identity provider (for example Keycloak) provides role/group claims in access tokens.
 
-## Repository structure
+Typical use case:
+- Identity provider authenticates users and issues tokens,
+- Kong plugin reads token claims such as `realm_access.roles`,
+- Kong ACL and consumer mapping enforce route-level access.
+
+## Key Features
+
+- Kong custom plugin structure compatible with Kong plugin loading.
+- Works in both:
+  - **DB-less mode** (`kong.yml` declarative config),
+  - **DB-backed mode** (PostgreSQL + Admin API / decK / Kong Manager).
+- Supports nested claim extraction (for example `realm_access.roles`).
+- Optional consumer mapping by `id`, `username`, or `custom_id`.
+- Identity/group/header injection for upstream services.
+- Docker-based local demo setup for quick testing.
+
+## Architecture (How It Works)
+
+1. Request reaches Kong route/service with `oidc-role` enabled.
+2. Plugin processes auth path based on configuration:
+   - bearer JWT verify,
+   - introspection,
+   - or OIDC authorization flow.
+3. Plugin extracts configured claims and sets Kong credential context.
+4. Plugin can map claims to Kong consumer entities.
+5. Kong ACL plugin (or upstream authorization logic) enforces route access.
+
+## Repository Structure
 
 ```text
-Dockerfile           # Example Dockerfile to build a Kong image with this plugin
-docker-compose.yml   # Example compose file (DB-less) to quickly try the plugin
-config-example/
-  kong.yml           # Example DB-less Kong configuration using the plugin
-oidc-role/
-  handler.lua        # Main plugin logic (access phase)
-  schema.lua         # Plugin configuration schema (fields & validation)
-  filter.lua         # Helper for parsing / matching role requirements
-  session.lua        # Optional session / cache helper (if used)
-  utils.lua          # Shared helper utilities
+.
+├── config-example/
+│   └── kong.yml                  # DB-less declarative example (demo values)
+├── oidc-role/
+│   ├── filter.lua                # Request filtering helper
+│   ├── handler.lua               # Main plugin handler (access phase)
+│   ├── schema.lua                # Kong plugin schema
+│   ├── session.lua               # Session secret handling
+│   └── utils.lua                 # Shared helpers
+├── CHANGELOG.md
+├── CODE_OF_CONDUCT.md
+├── CONTRIBUTING.md
+├── Dockerfile                    # Custom Kong image with plugin
+├── LICENSE                       # MIT license
+├── Makefile                      # Common developer commands
+├── NOTICE                        # Attribution / notices
+├── SECURITY.md
+├── VERSION
+└── docker-compose.yml            # DB-less docker compose demo
 ```
-
-> **Note:** `docker-compose.yml` + `config-example/kong.yml` are only **examples to show the plugin working in DB-less mode**.  
-> The plugin itself can also be installed and configured in a normal Kong **DB mode** (Postgres) setup.
-
----
-
-## How it works
-
-1. An upstream OIDC / JWT-auth plugin (for example `kong-oidc` or `jwt`) validates the access token and exposes the decoded token to Kong (via headers, `ngx.ctx`, etc.).
-2. The **`oidc-role`** plugin runs in the access phase and:
-   - reads the decoded token
-   - extracts roles from a configurable JSON path (for example: `realm_access.roles`)
-   - compares them with the required roles configured per route/service
-3. If the required roles are present, the request is allowed to continue to the upstream service.
-4. If roles are missing, the plugin responds with **HTTP 403 Forbidden** (or your configured status code/message).
-
-In other words: authentication and token validation stay in the OIDC/JWT plugin; **`oidc-role` focuses purely on authorization**.
-
----
-
-## Kong deployment modes
-
-### DB-less (declarative config)
-
-- `KONG_DATABASE=off`
-- You define **services, routes, and plugins** in a single YAML file, e.g. `kong.yml`.
-- This repo ships an example in `config-example/kong.yml` to show how the plugin can be configured.
-
-Example snippet:
-
-```yaml
-_format_version: "3.0"
-
-services:
-  - name: lob1-service
-    url: http://lob1:8080
-    routes:
-      - name: lob1-route
-        paths:
-          - /lob1
-        plugins:
-          - name: oidc
-            config:
-              # your existing OIDC / Keycloak configuration here
-          - name: oidc-role
-            config:
-              required_roles:
-                - lob1-user
-              roles_claim: realm_access.roles
-```
-
-You then start Kong with:
-
-```bash
-KONG_DATABASE=off     KONG_DECLARATIVE_CONFIG=/etc/kong/kong.yml     kong start
-```
-
-or via Docker / Compose (see the example `docker-compose.yml`).
-
-### DB mode (Postgres)
-
-In **DB mode**, you keep the plugin code exactly the same, but configuration goes into the database via the **Admin API** (or Kong Manager / `deck`).
-
-Minimal example using the Admin API:
-
-```bash
-# 1) Create service
-curl -X POST http://localhost:8001/services       --data name=lob1-service       --data url=http://lob1:8080
-
-# 2) Create route
-curl -X POST http://localhost:8001/services/lob1-service/routes       --data name=lob1-route       --data paths[]=/lob1
-
-# 3) Attach oidc-role plugin to that route
-curl -X POST http://localhost:8001/routes/lob1-route/plugins       --data name=oidc-role       --data config.required_roles[1]=lob1-user       --data config.roles_claim=realm_access.roles
-```
-
-The plugin logic is identical; only the **way you store and manage configuration** (YAML vs. DB) changes.
-
----
 
 ## Installation
 
-You have two main options:
-
-### 1. Build a custom Kong image (example in this repo)
-
-The provided `Dockerfile` can be used to build a Kong image with the plugin included:
+### Option 1: Build a custom Kong image (recommended for containerized deployments)
 
 ```bash
-# From the repository root
-docker build -t kong-with-oidc-role .
+docker build -t kong-oidc-role:local .
 ```
 
-In the image, the plugin code from `oidc-role/` is copied into the Kong plugins directory (e.g. `/usr/local/share/lua/5.1/kong/plugins/oidc-role`) and Kong is configured to load it.
+### Option 2: Install plugin files into an existing Kong instance
 
-### 2. Manual installation into an existing Kong
+Copy `oidc-role/` to:
 
-1. Copy the folder `oidc-role/` into your Kong plugins directory, for example:
+```text
+/usr/local/share/lua/5.1/kong/plugins/oidc-role
+```
 
-   ```text
-   /usr/local/share/lua/5.1/kong/plugins/oidc-role
-   ```
+Then enable plugin loading in Kong config:
 
-2. Add the plugin name to your Kong configuration (`kong.conf` or environment variable):
+```ini
+plugins = bundled,oidc-role
+```
 
-   ```ini
-   plugins = bundled,oidc-role
-   ```
+Restart Kong.
 
-3. Restart Kong so that it can discover and load the new plugin.
+## Configuration Examples
 
-You can then configure it either:
+### Minimal plugin configuration
 
-- declaratively in `kong.yml` (DB-less), **or**
-- via the Admin API / Kong Manager / `deck` (DB mode).
+```yaml
+plugins:
+  - name: oidc-role
+    config:
+      discovery: "https://<idp-host>/realms/<realm>/.well-known/openid-configuration"
+      client_id: "<client-id>"
+      client_secret: "<client-secret>"
+      bearer_only: "yes"
+      use_jwks: "yes"
+      consumer_claim: "realm_access.roles"
+      consumer_by: "custom_id"
+```
 
----
+### DB-less Kong usage
 
-## Configuration options
+1. Update `config-example/kong.yml` with your real IdP endpoints and credentials.
+2. Start Kong in DB-less mode.
 
-The exact fields are defined in `oidc-role/schema.lua`. The key ones are:
+```bash
+docker compose up --build
+```
 
-- `required_roles` (array of strings, **required**)  
-  List of roles that must be present in the token for the request to be allowed.
+### DB-backed Kong usage
 
-- `roles_claim` (string, default: `realm_access.roles`)  
-  JSON path or dot-notation indicating where to find the roles array inside the decoded token.
+Use PostgreSQL-backed Kong and configure resources via Admin API/decK.
 
-- `logical_operator` (string, default: `"AND"`)  
-  Whether **all** roles (`"AND"`) or **at least one** role (`"OR"`) must match.
+High-level steps:
+1. Install plugin on all Kong data-plane nodes.
+2. Enable `oidc-role` in Kong `plugins` list.
+3. Create services/routes/consumers.
+4. Attach `oidc-role` and ACL config via Admin API or declarative sync (decK).
 
-- `unauthorized_status` (number, default: `403`)  
-  HTTP status code to return when the role check fails.
+## Docker Usage
 
-- `unauthorized_message` (string, optional)  
-  Custom error message body for failed authorization.
+```bash
+# build
+make build
 
-Check `schema.lua` for the full list of options and the exact field names.
+# run in detached mode
+make up
 
----
+# inspect logs
+make logs
 
-## Running the example (DB-less demo)
+# stop/remove containers
+make down
+```
 
-1. Make sure Docker (and the Compose plugin) is installed.
-2. From the repo root run:
+By default the compose setup exposes:
+- Proxy: `http://localhost:9180`
+- Admin API: `http://localhost:9181`
 
-   ```bash
-   docker compose up --build
-   ```
+## Development Notes
 
-3. Kong will start with the `oidc-role` plugin enabled and declarative configuration from `config-example/kong.yml` (feel free to adapt both files to your own environment).
+- Keep plugin behavior backwards-compatible unless explicitly versioned.
+- Favor small, targeted changes in Lua handlers.
+- Use placeholders for demo configuration values (never real secrets).
+- Run `make validate` before committing docs/config updates.
 
-4. Call the protected route with a valid access token:
+## Testing (Practical Approach)
 
-   ```bash
-   curl -H "Authorization: Bearer <ACCESS_TOKEN>" http://localhost:8000/lob1
-   ```
+No automated unit test suite is currently bundled with runtime dependencies in this repository.
 
-   - If the token contains the required role(s), the upstream service will respond.
-   - Otherwise you will get the configured `403` response from the plugin.
+Recommended validation path:
+1. Static/config checks (`make validate`),
+2. Launch demo (`make up`),
+3. Verify unauthorized and authorized request behavior with curl.
 
----
+### Sample curl checks
 
-## Use cases
+Unauthorized (missing/invalid token):
 
-- Restrict access to APIs based on **Keycloak realm roles**
-- Implement RBAC on top of existing OIDC / JWT authentication
-- Protect internal admin / management APIs with minimal changes to application code
-- Combine with other Kong plugins (rate limiting, logging, request/response transformation, etc.)
+```bash
+curl -i http://localhost:9180/lob1
+```
 
----
+Authorized (valid token placeholder):
 
-## Notes / disclaimers
+```bash
+curl -i \
+  -H "Authorization: Bearer <VALID_ACCESS_TOKEN>" \
+  http://localhost:9180/lob1
+```
 
-- This plugin is intended as **example / lab code**. Review and harden it before using in production.
-- Pay attention to TLS, timeouts, token validation, and key rotation in your OIDC setup.
-- If you extend the plugin (e.g. client roles, groups, multi-IdP scenarios), feel free to fork and adapt it.
+> Replace `<VALID_ACCESS_TOKEN>` with a real token from your identity provider.
+
+## Limitations
+
+- This repository is primarily a reference implementation and demo packaging.
+- Behavior depends on correct token/claim structure from your IdP.
+- Production-hardening (timeouts, retries, observability, policy rules) should be tailored to your environment.
+
+## Security Considerations
+
+- **Do not store client secrets in plain text** in version-controlled config files.
+- Use environment variables, Docker secrets, or a secret manager.
+- Treat `config-example/kong.yml` values as **placeholders only**.
+- Validate TLS settings and avoid insecure `ssl_verify` behavior in production.
+- Review and threat-model this plugin before production deployment.
+
+See `SECURITY.md` for reporting guidance and deployment recommendations.
+
+## Roadmap / Future Improvements
+
+- Add automated plugin tests (busted/spec + CI workflow).
+- Add compatibility matrix for Kong versions.
+- Add examples for claim-based role matching policies beyond consumer mapping.
+- Improve structured logging and operational metrics.
+
+## Author and License
+
+- **Author:** Vahid Tavakkoli (2026)
+- **License:** MIT (see `LICENSE`)
+- Additional attribution details: see `NOTICE`

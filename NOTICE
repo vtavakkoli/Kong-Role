@@ -1,0 +1,10 @@
+Kong OIDC Role Plugin
+Copyright (c) 2026 Vahid Tavakkoli
+
+Author
+- Vahid Tavakkoli
+
+Third-party notice
+- Portions of consumer-setting logic in `oidc-role/utils.lua` are derived from
+  Kong plugin patterns and remain subject to their original licensing notices,
+  as referenced in source comments.

@@ -1,5 +1,5 @@
-﻿_format_version: "3.0"
-_comment: "DB-less Kong config for IAM Lab: Keycloak OIDC + ACL"
+_format_version: "3.0"
+_comment: "DB-less Kong config example for oidc-role plugin (placeholders only)"
 
 services:
   - name: lob1-service
@@ -7,15 +7,15 @@ services:
     plugins:
       - name: oidc-role
         config:
-          discovery:     http://10.0.0.50:9100/realms/IAM_Lab_Realm/.well-known/openid-configuration
-          introspection_endpoint: http://keycloak:8080/realms/IAM_Lab_Realm/protocol/openid-connect/token/introspect
-          client_id:     kong
-          client_secret: S3cr3tKong
-          scope:         openid
-          ssl_verify:    "false"
-          bearer_only:   "yes"
-          consumer_claim:    realm_access.roles
-          consumer_by:       custom_id
+          discovery: https://idp.example.com/realms/example/.well-known/openid-configuration
+          introspection_endpoint: https://idp.example.com/realms/example/protocol/openid-connect/token/introspect
+          client_id: kong
+          client_secret: REPLACE_ME
+          scope: openid
+          ssl_verify: "yes"
+          bearer_only: "yes"
+          consumer_claim: realm_access.roles
+          consumer_by: custom_id
           use_jwks: "yes"
 
   - name: lob2-service
@@ -23,60 +23,59 @@ services:
     plugins:
       - name: oidc-role
         config:
-          discovery:     http://10.0.0.50:9100/realms/IAM_Lab_Realm/.well-known/openid-configuration
-          introspection_endpoint: http://keycloak:8080/realms/IAM_Lab_Realm/protocol/openid-connect/token/introspect
-          client_id:     kong
-          client_secret: S3cr3tKong
-          scope:         openid
-          ssl_verify:    "false"
-          bearer_only:   "yes"
-          consumer_claim:    realm_access.roles
-          consumer_by:       custom_id
+          discovery: https://idp.example.com/realms/example/.well-known/openid-configuration
+          introspection_endpoint: https://idp.example.com/realms/example/protocol/openid-connect/token/introspect
+          client_id: kong
+          client_secret: REPLACE_ME
+          scope: openid
+          ssl_verify: "yes"
+          bearer_only: "yes"
+          consumer_claim: realm_access.roles
+          consumer_by: custom_id
           use_jwks: "yes"
-
 
   - name: lob3-service
     url: http://lob3:8080
     plugins:
       - name: oidc-role
         config:
-          discovery:     http://10.0.0.50:9100/realms/IAM_Lab_Realm/.well-known/openid-configuration
-          introspection_endpoint: http://keycloak:8080/realms/IAM_Lab_Realm/protocol/openid-connect/token/introspect
-          client_id:     kong
-          client_secret: S3cr3tKong
-          scope:         openid
-          ssl_verify:    "false"
-          bearer_only:   "yes"
-          consumer_claim:    realm_access.roles
-          consumer_by:       custom_id
+          discovery: https://idp.example.com/realms/example/.well-known/openid-configuration
+          introspection_endpoint: https://idp.example.com/realms/example/protocol/openid-connect/token/introspect
+          client_id: kong
+          client_secret: REPLACE_ME
+          scope: openid
+          ssl_verify: "yes"
+          bearer_only: "yes"
+          consumer_claim: realm_access.roles
+          consumer_by: custom_id
           use_jwks: "yes"
 
 routes:
   - name: lob1-route
     service: lob1-service
-    paths: [ /lob1 ]
+    paths: [/lob1]
     plugins:
       - name: acl
         config:
-          allow: 
+          allow:
             - lob1-user
 
   - name: lob2-route
     service: lob2-service
-    paths: [ /lob2 ]
+    paths: [/lob2]
     plugins:
       - name: acl
         config:
-          allow: 
+          allow:
             - lob2-user
 
   - name: lob3-route
     service: lob3-service
-    paths: [ /lob3 ]
+    paths: [/lob3]
     plugins:
       - name: acl
         config:
-          allow: 
+          allow:
             - lob3-user
 
 consumers:

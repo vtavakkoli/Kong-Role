@@ -7,6 +7,7 @@ local filter  = require("kong.plugins.oidc-role.filter")
 local session = require("kong.plugins.oidc-role.session")
 local cjson = require("cjson")
 
+-- Main Kong access-phase entrypoint.
 function OidcHandler:access(config)
   ngx.log(ngx.DEBUG, "[oidc-role] effective config → ", cjson.encode(config))
   local oidcConfig = utils.get_options(config, ngx)
@@ -27,7 +28,7 @@ function OidcHandler:access(config)
   ngx.log(ngx.DEBUG, "[oidc-role] access() done")
 end
 
--- helper to get nested values from a table via “a.b.c” paths
+-- Helper to get nested values from a table via "a.b.c" paths.
 local function get_nested(tbl, path)
   local cur = tbl
   for key in path:gmatch("[^%.]+") do
@@ -39,7 +40,7 @@ local function get_nested(tbl, path)
   return cur
 end
 
---─── consumer mapping helper ───────────────────────────────────────────
+-- Consumer mapping helper: resolves claims to Kong consumers when configured.
 local function map_consumer(oidcConfig, response)
   ngx.log(ngx.DEBUG, "[oidc-role] map_consumer() begin")
   if not (oidcConfig.consumer_claim and oidcConfig.consumer_by) then
@@ -114,7 +115,7 @@ local function map_consumer(oidcConfig, response)
   ngx.log(ngx.WARN, "[oidc-role] map_consumer(): no matching consumer for any claim value")
 end
 
---─── main handler ────────────────────────────────────────────────────────────
+-- Main auth/identity handling flow.
 function handle(oidcConfig)
   ngx.log(ngx.DEBUG, "[oidc-role] handle() start")
 
@@ -187,8 +188,7 @@ function handle(oidcConfig)
   ngx.log(ngx.DEBUG, "[oidc-role] handle() end (no response)")
 end
 
-
---─── helper functions below unchanged ───────────────────────────────────────
+-- Helper functions below.
 
 function make_oidc(oidcConfig)
   ngx.log(ngx.DEBUG, "[oidc-role] make_oidc() calling authenticate: ", ngx.var.request_uri)

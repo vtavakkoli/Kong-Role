@@ -1,0 +1,20 @@
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+
+# Lua/Kong artifacts
+.luarocks/
+
+# Environment files
+.env
+.env.*
+
+# Docker overrides/local files
+docker-compose.override.yml
