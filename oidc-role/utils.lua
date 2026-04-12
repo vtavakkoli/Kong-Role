@@ -174,7 +174,7 @@ function M.injectHeaders(header_names, header_claims, sources)
     kong.log.err('Different number of elements provided in header_names and header_claims. Headers will not be added.')
     return
   end
-  kong.log.err(sources)
+
   for i = 1, #header_names do
     local header, claim
     header = header_names[i]
@@ -184,13 +184,10 @@ function M.injectHeaders(header_names, header_claims, sources)
       local source, claim_value
       source = sources[j]
       claim_value = source[claim]
-      kong.log.err(claim_value)
-      kong.log.err(type(claim_value))
       -- Convert table to string if claim is a table
       if type(claim_value) == "table" then
         claim_value = table.concat(claim_value, ", ")
       end
-      kong.log.err(claim_value)
       if (source and source[claim]) then
         kong.service.request.set_header(header, claim_value)
         break
