@@ -1,5 +1,6 @@
 IMAGE ?= kong-oidc-role:local
 SERVICE ?= kong
+BUSTED ?= busted
 
 .PHONY: build up down logs ps validate test
 
@@ -20,9 +21,11 @@ ps:
 
 validate:
 	docker compose config >/dev/null
-	test -f oidc-role/handler.lua
-	test -f oidc-role/schema.lua
+	luac -p oidc-role/handler.lua
+	luac -p oidc-role/utils.lua
+	luac -p oidc-role/filter.lua
+	luac -p oidc-role/session.lua
+	luac -p oidc-role/schema.lua
 
 test:
-	@echo "No automated test runner configured yet."
-	@echo "See README.md for manual integration testing steps."
+	$(BUSTED) --helper=spec/spec_helper.lua --verbose spec
