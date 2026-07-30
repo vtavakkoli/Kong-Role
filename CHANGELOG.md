@@ -18,12 +18,20 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Nested claim extraction for Keycloak realm roles, client roles, and groups.
 - Multi-role authorization through `kong.ctx.shared.authenticated_groups`.
 - Optional backward-compatible Kong consumer mapping.
-- LuaRocks package metadata, unit-test scaffold, and GitHub Actions syntax checks.
+- LuaRocks package metadata and a 37-test Busted unit suite covering utilities, filters, sessions, schema defaults, and handler flows.
+- GitHub Actions jobs for Lua 5.1 syntax validation and executable unit tests.
 
 ### Changed
 - A caller identity is now derived from `sub` by default; roles are authorization groups rather than synthetic consumers.
 - Configuration flags now use booleans instead of `yes`/`no` strings.
 - Secure JWT mode is the default configuration.
+- Authentication failures return 401, authorization failures return 403, and internal configuration failures return 500.
+
+### Fixed
+- Custom `principal_claim` values no longer incorrectly require a `sub` claim.
+- Invalid request-filter patterns no longer crash request processing.
+- Authorization-code access and ID token headers are injected after trusted-header cleanup instead of being removed immediately.
+- Invalid session secrets stop the authorization-code flow before contacting the identity provider.
 
 ## [1.0.0] - 2026-04-12
 ### Added

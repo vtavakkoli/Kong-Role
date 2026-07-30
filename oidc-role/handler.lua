@@ -9,16 +9,24 @@ local session = require("kong.plugins.oidc-role.session")
 local openidc = require("resty.openidc")
 local validators = require("resty.jwt-validators")
 
-local function unauthorized(message)
-  return kong.response.exit(401, { message = message or "Unauthorized" }, {
-    ["WWW-Authenticate"] = 'Bearer realm="kong"',
-  })
+local function error_response(status, message)
+  local headers
+  if status == 401 then
+    headers = { ["WWW-Authenticate"] = 'Bearer realm="kong"' }
+  end
+
+  local public_message = message or "Request denied"
+  if status >= 500 then
+    public_message = "Internal Server Error"
+  end
+
+  return kong.response.exit(status, { message = public_message }, headers)
 end
 
 local function get_identity(claims, config)
   local principal = utils.get_claim(claims, config.principal_claim)
   if config.require_principal and (principal == nil or principal == "") then
-    return nil, "required principal claim is missing"
+    return nil, "required principal claim is missing", 401
   end
 
   return {
@@ -28,19 +36,18 @@ local function get_identity(claims, config)
 end
 
 local function establish_context(claims, config)
-  local identity, err = get_identity(claims, config)
+  local identity, err, status = get_identity(claims, config)
   if not identity then
-    return nil, err
+    return nil, err, status
   end
-
-  utils.set_credentials(identity)
-  utils.clear_trusted_headers(config)
 
   local groups = utils.collect_claim_values(claims, config.authorization_claims)
   if config.require_authorization_claim and #groups == 0 then
-    return nil, "required authorization claims are missing"
+    return nil, "required authorization claims are missing", 403
   end
 
+  utils.clear_trusted_headers(config)
+  utils.set_credentials(identity)
   kong.ctx.shared.authenticated_groups = groups
   utils.inject_allowlisted_headers(config.header_names, config.header_claims, claims)
 
@@ -71,7 +78,7 @@ local function map_consumer_legacy(claims, config)
 
     if err then
       kong.log.err("oidc-role consumer lookup failed: ", err)
-      return nil, "consumer lookup failed"
+      return nil, "consumer lookup failed", 500
     end
 
     if consumer then
@@ -81,7 +88,7 @@ local function map_consumer_legacy(claims, config)
   end
 
   if config.consumer_mapping_required then
-    return nil, "no matching Kong consumer"
+    return nil, "no matching Kong consumer", 403
   end
 
   return true
@@ -104,7 +111,7 @@ end
 
 local function verify_jwt(config)
   if not utils.has_bearer_access_token() then
-    return nil, "missing bearer token"
+    return nil, "missing bearer token", 401
   end
 
   local validation = {
@@ -113,8 +120,10 @@ local function verify_jwt(config)
     nbf = validators.opt_is_not_before(),
   }
 
-  if config.require_principal then
-    validation.sub = validators.required()
+  if config.require_principal
+      and type(config.principal_claim) == "string"
+      and not config.principal_claim:find(".", 1, true) then
+    validation[config.principal_claim] = validators.required()
   end
 
   local claims, err = openidc.bearer_jwt_verify({
@@ -129,12 +138,12 @@ local function verify_jwt(config)
 
   if err or not claims then
     kong.log.warn("oidc-role JWT validation failed: ", err or "unknown error")
-    return nil, "invalid bearer token"
+    return nil, "invalid bearer token", 401
   end
 
   local ok, claim_err = validate_claims(claims, config)
   if not ok then
-    return nil, claim_err
+    return nil, claim_err, 401
   end
 
   return claims
@@ -142,7 +151,7 @@ end
 
 local function introspect(config)
   if not utils.has_bearer_access_token() then
-    return nil, "missing bearer token"
+    return nil, "missing bearer token", 401
   end
 
   local claims, err = openidc.introspect({
@@ -157,19 +166,23 @@ local function introspect(config)
 
   if err or not claims or claims.active == false then
     kong.log.warn("oidc-role token introspection failed: ", err or "inactive token")
-    return nil, "invalid bearer token"
+    return nil, "invalid bearer token", 401
   end
 
   local ok, claim_err = validate_claims(claims, config)
   if not ok then
-    return nil, claim_err
+    return nil, claim_err, 401
   end
 
   return claims
 end
 
 local function authorization_code(config)
-  session.configure(config)
+  local configured, session_err = session.configure(config)
+  if not configured then
+    return nil, session_err, 500
+  end
+
   local result, err = openidc.authenticate({
     client_id = config.client_id,
     client_secret = config.client_secret,
@@ -184,22 +197,20 @@ local function authorization_code(config)
 
   if err or not result then
     kong.log.warn("oidc-role authorization-code flow failed: ", err or "unknown error")
-    return nil, "authentication failed"
+    return nil, "authentication failed", 401
   end
 
   local claims = result.user or result.id_token
   if not claims then
-    return nil, "identity claims missing"
+    return nil, "identity claims missing", 401
   end
 
-  if config.expose_access_token and result.access_token then
-    utils.inject_access_token(result.access_token, config.access_token_header_name)
-  end
-  if config.expose_id_token and result.id_token then
-    utils.inject_json_header(result.id_token, config.id_token_header_name)
+  local ok, claim_err = validate_claims(claims, config)
+  if not ok then
+    return nil, claim_err, 401
   end
 
-  return claims
+  return claims, nil, nil, result
 end
 
 local function authenticate(config)
@@ -211,7 +222,7 @@ local function authenticate(config)
     return authorization_code(config)
   end
 
-  return nil, "unsupported authentication mode"
+  return nil, "unsupported authentication mode", 500
 end
 
 function OidcHandler:access(config)
@@ -228,19 +239,28 @@ function OidcHandler:access(config)
   kong.log.debug("oidc-role started; mode=", options.auth_mode,
                  ", discovery=", options.discovery)
 
-  local claims, err = authenticate(options)
+  local claims, err, status, auth_result = authenticate(options)
   if not claims then
-    return unauthorized(err)
+    return error_response(status or 401, err)
   end
 
-  local groups, context_err = establish_context(claims, options)
+  local groups, context_err, context_status = establish_context(claims, options)
   if not groups then
-    return unauthorized(context_err)
+    return error_response(context_status or 401, context_err)
   end
 
-  local ok, mapping_err = map_consumer_legacy(claims, options)
+  if auth_result then
+    if options.expose_access_token and auth_result.access_token then
+      utils.inject_access_token(auth_result.access_token, options.access_token_header_name)
+    end
+    if options.expose_id_token and auth_result.id_token then
+      utils.inject_json_header(auth_result.id_token, options.id_token_header_name)
+    end
+  end
+
+  local ok, mapping_err, mapping_status = map_consumer_legacy(claims, options)
   if not ok then
-    return unauthorized(mapping_err)
+    return error_response(mapping_status or 403, mapping_err)
   end
 end
 
