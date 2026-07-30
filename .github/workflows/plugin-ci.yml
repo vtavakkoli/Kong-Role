@@ -15,14 +15,29 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install Lua
         run: sudo apt-get update && sudo apt-get install -y lua5.1
-      - name: Parse Lua sources
+      - name: Parse Lua sources and tests
         run: |
           luac5.1 -p oidc-role/handler.lua
           luac5.1 -p oidc-role/utils.lua
           luac5.1 -p oidc-role/filter.lua
           luac5.1 -p oidc-role/session.lua
           luac5.1 -p oidc-role/schema.lua
+          luac5.1 -p spec/*.lua
+          luac5.1 -p spec/support/*.lua
       - name: Validate release files
         run: |
           test "$(cat VERSION)" = "2.0.0"
           grep -q "ssl_verify: true" config-example/kong.yml
+
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Lua test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.1 liblua5.1-0-dev luarocks
+          sudo luarocks --lua-version=5.1 install busted
+          sudo luarocks --lua-version=5.1 install lua-cjson
+      - name: Run unit tests
+        run: busted --helper=spec/spec_helper.lua --verbose spec
