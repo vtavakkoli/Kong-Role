@@ -15,8 +15,9 @@ local plugin_modules = {
 }
 
 for module_name, path in pairs(plugin_modules) do
+  local module_path = path
   package.preload[module_name] = function()
-    return load_plugin_file(path)
+    return load_plugin_file(module_path)
   end
 end
 
