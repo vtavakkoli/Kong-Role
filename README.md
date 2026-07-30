@@ -1,216 +1,694 @@
 # Kong OIDC Role Plugin
 
-A lightweight, reusable Kong custom plugin for role-based authorization using OIDC/JWT claims (with Keycloak-friendly defaults).
+[![Kong Gateway](https://img.shields.io/badge/Kong%20Gateway-3.9.3-003459?logo=kong&logoColor=white)](https://konghq.com/)
+[![Plugin Version](https://img.shields.io/badge/oidc--role-v2.0.0-0ea5e9)](VERSION)
+[![CI](https://github.com/vtavakkoli/Kong-Role/actions/workflows/plugin-ci.yml/badge.svg)](https://github.com/vtavakkoli/Kong-Role/actions/workflows/plugin-ci.yml)
+[![Tests](https://img.shields.io/badge/unit%20tests-37%20passing-brightgreen)](#testing)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-This repository packages a Kong plugin named `oidc-role` that reads identity claims from validated tokens and maps them to Kong consumer/ACL authorization decisions.
+**Kong-Role** is a lightweight custom plugin for Kong Gateway that turns trusted OpenID Connect and JWT claims into Kong authorization groups.
 
-> **Author:** Written by **Vahid Tavakkoli (2026)**.
+It is designed for Keycloak-friendly role models such as:
 
-## Project Overview
+- `realm_access.roles`
+- `resource_access.<client>.roles`
+- `groups`
 
-`oidc-role` is intended to be used **after authentication** (for example, after `kong-oidc`, OpenID Connect introspection, or JWT validation).
+The plugin validates identity tokens, extracts one or more authorization claims, establishes a trusted Kong credential context, and works with the standard Kong ACL plugin to enforce route-level access.
 
-The plugin focuses on authorization and identity mapping by:
-- validating/introspecting bearer tokens (depending on config),
-- extracting claim values (including nested paths),
-- optionally mapping claims to Kong consumers,
-- injecting identity headers/groups for upstream services,
-- enabling Kong ACL-based access control per route/service.
+> **Validated with Kong Gateway 3.9.3** using real Keycloak RS256 access tokens and end-to-end role-based access tests.
 
-## Purpose
+---
 
-This project enables centralized API authorization in Kong when your identity provider (for example Keycloak) provides role/group claims in access tokens.
+## Why Kong-Role?
 
-Typical use case:
-- Identity provider authenticates users and issues tokens,
-- Kong plugin reads token claims such as `realm_access.roles`,
-- Kong ACL and consumer mapping enforce route-level access.
+Identity providers authenticate users, but APIs still need a reliable way to decide:
 
-## Key Features
+- Who is calling?
+- Is the token valid?
+- Was it issued by the expected identity provider?
+- Was it intended for this API?
+- Which roles or groups does the caller have?
+- Which routes may the caller access?
 
-- Kong custom plugin structure compatible with Kong plugin loading.
-- Works in both:
-  - **DB-less mode** (`kong.yml` declarative config),
-  - **DB-backed mode** (PostgreSQL + Admin API / decK / Kong Manager).
-- Supports nested claim extraction (for example `realm_access.roles`).
-- Optional consumer mapping by `id`, `username`, or `custom_id`.
-- Identity/group/header injection for upstream services.
-- Docker-based local demo setup for quick testing.
-
-## Architecture (How It Works)
-
-1. Request reaches Kong route/service with `oidc-role` enabled.
-2. Plugin processes auth path based on configuration:
-   - bearer JWT verify,
-   - introspection,
-   - or OIDC authorization flow.
-3. Plugin extracts configured claims and sets Kong credential context.
-4. Plugin can map claims to Kong consumer entities.
-5. Kong ACL plugin (or upstream authorization logic) enforces route access.
-
-## Repository Structure
+Kong-Role centralizes those decisions at the gateway.
 
 ```text
-.
-├── config-example/
-│   └── kong.yml                  # DB-less declarative example (demo values)
-├── oidc-role/
-│   ├── filter.lua                # Request filtering helper
-│   ├── handler.lua               # Main plugin handler (access phase)
-│   ├── schema.lua                # Kong plugin schema
-│   ├── session.lua               # Session secret handling
-│   └── utils.lua                 # Shared helpers
-├── CHANGELOG.md
-├── CODE_OF_CONDUCT.md
-├── CONTRIBUTING.md
-├── Dockerfile                    # Custom Kong image with plugin
-├── LICENSE                       # MIT license
-├── Makefile                      # Common developer commands
-├── NOTICE                        # Attribution / notices
-├── SECURITY.md
-├── VERSION
-└── docker-compose.yml            # DB-less docker compose demo
+Client / BFF
+    │
+    │ Authorization: Bearer <access-token>
+    ▼
+Kong Gateway
+    │
+    ├── oidc-role
+    │     ├── verifies JWT or introspects token
+    │     ├── validates issuer, audience and time claims
+    │     ├── extracts principal and authorization claims
+    │     └── publishes trusted authenticated groups
+    │
+    ├── Kong ACL
+    │     └── allows or denies the route
+    │
+    ▼
+Protected upstream service
 ```
 
-## Installation
+No synthetic Kong Consumer is required for normal multi-role authorization.
 
-### Option 1: Build a custom Kong image (recommended for containerized deployments)
+---
+
+## Highlights
+
+- **Kong Gateway 3.9.3 tested**
+- **Secure JWT mode by default**
+- **RS256 signature validation through OIDC Discovery and JWKS**
+- **Token introspection mode**
+- **Authorization-code mode**
+- **Issuer and audience validation**
+- **Nested claim extraction**
+- **Multiple roles per user**
+- **Kong authenticated-group integration**
+- **Standard Kong ACL compatibility**
+- **Optional legacy Consumer mapping**
+- **Trusted-header cleanup and controlled header injection**
+- **DB-less and DB-backed deployment support**
+- **37 automated Busted unit tests**
+- **GitHub Actions validation**
+- **Docker-based local development**
+
+---
+
+## Supported authentication modes
+
+| Mode | Purpose | Typical use |
+|---|---|---|
+| `jwt` | Validates a bearer JWT locally using Discovery and JWKS | Recommended for Keycloak access tokens |
+| `introspection` | Sends the bearer token to an introspection endpoint | Opaque tokens or centralized revocation checks |
+| `authorization_code` | Performs an OIDC authorization-code flow | Gateway-managed interactive login |
+
+The default mode is:
+
+```yaml
+auth_mode: jwt
+```
+
+---
+
+## Requirements
+
+- Kong Gateway **3.9.3**
+- Lua 5.1 / LuaJIT runtime provided by Kong
+- An OpenID Connect provider such as Keycloak
+- Signed access tokens or a configured introspection endpoint
+- Kong ACL when route-level role enforcement is required
+
+---
+
+## Quick start
+
+### 1. Clone the repository
 
 ```bash
-docker build -t kong-oidc-role:local .
+git clone https://github.com/vtavakkoli/Kong-Role.git
+cd Kong-Role
 ```
 
-### Option 2: Install plugin files into an existing Kong instance
+### 2. Build the custom Kong image
 
-Copy `oidc-role/` to:
+```bash
+docker build -t kong-oidc-role:2.0.0 .
+```
+
+Or use the Makefile:
+
+```bash
+make build
+```
+
+### 3. Configure the plugin
+
+Update:
 
 ```text
-/usr/local/share/lua/5.1/kong/plugins/oidc-role
+config-example/kong.yml
 ```
 
-Then enable plugin loading in Kong config:
+Replace the example issuer, Discovery URL, audience, and authorization claims with values from your identity provider.
 
-```ini
-plugins = bundled,oidc-role
+### 4. Start Kong
+
+```bash
+docker compose up --build -d
 ```
 
-Restart Kong.
+Or:
 
-## Configuration Examples
+```bash
+make up
+```
 
-### Minimal plugin configuration
+### 5. Check the services
+
+```bash
+docker compose ps
+```
+
+Default demo ports:
+
+| Endpoint | Address |
+|---|---|
+| Kong proxy | `http://localhost:9180` |
+| Kong Admin API | `http://localhost:9181` |
+
+---
+
+## Recommended JWT configuration
+
+The following DB-less example validates Keycloak JWTs and authorizes requests through Kong ACL.
+
+```yaml
+_format_version: "3.0"
+
+services:
+  - name: lob1-service
+    url: http://lob1:8080
+
+    plugins:
+      - name: oidc-role
+        config:
+          auth_mode: jwt
+
+          discovery: >-
+            https://keycloak.example.com/realms/example/
+            .well-known/openid-configuration
+
+          expected_issuer: >-
+            https://keycloak.example.com/realms/example
+
+          client_id: kong
+
+          allowed_audiences:
+            - kong
+
+          allowed_signing_algorithms:
+            - RS256
+
+          ssl_verify: true
+          timeout: 10000
+
+          principal_claim: sub
+          username_claim: preferred_username
+          require_principal: true
+
+          authorization_claims:
+            - resource_access.kong.roles
+            - realm_access.roles
+            - groups
+
+          require_authorization_claim: true
+
+          expose_userinfo: false
+          expose_id_token: false
+          expose_access_token: false
+
+routes:
+  - name: lob1-route
+    service: lob1-service
+    paths:
+      - /lob1
+
+    plugins:
+      - name: acl
+        config:
+          allow:
+            - lob1-user
+
+          always_use_authenticated_groups: true
+          hide_groups_header: true
+```
+
+> YAML folded strings are shown for readability. In a real file, ensure the Discovery URL contains no spaces or line breaks.
+
+A compact form is:
+
+```yaml
+discovery: https://keycloak.example.com/realms/example/.well-known/openid-configuration
+expected_issuer: https://keycloak.example.com/realms/example
+```
+
+---
+
+## Keycloak role mapping
+
+A Keycloak access token may contain:
+
+```json
+{
+  "sub": "6cde4adb-7a14-4fce-a4c2-3d391468ea27",
+  "preferred_username": "alice",
+  "aud": ["kong"],
+  "realm_access": {
+    "roles": [
+      "lob1-user",
+      "offline_access"
+    ]
+  },
+  "resource_access": {
+    "kong": {
+      "roles": [
+        "api-user"
+      ]
+    }
+  }
+}
+```
+
+With this configuration:
+
+```yaml
+authorization_claims:
+  - resource_access.kong.roles
+  - realm_access.roles
+  - groups
+```
+
+Kong-Role collects all string values, removes duplicates, sorts the result, and publishes them as trusted authenticated groups.
+
+Kong ACL can then authorize a route using:
+
+```yaml
+plugins:
+  - name: acl
+    config:
+      allow:
+        - lob1-user
+      always_use_authenticated_groups: true
+```
+
+---
+
+## Request flow
+
+### JWT mode
+
+1. A client or Backend-for-Frontend sends an access token to Kong.
+2. Kong-Role reads the `Authorization: Bearer ...` header.
+3. The plugin retrieves OIDC Discovery and JWKS metadata.
+4. The JWT signature and configured signing algorithm are verified.
+5. Expiration, issued-at, not-before, issuer, audience, and principal claims are checked.
+6. Roles and groups are extracted from configured nested claim paths.
+7. The plugin creates a trusted Kong credential context.
+8. Extracted roles are published through `kong.ctx.shared.authenticated_groups`.
+9. Kong ACL allows or rejects the route.
+10. The request is forwarded only when authorization succeeds.
+
+JWT mode validates tokens locally after Discovery and JWKS data are available. It does not require a token-introspection call for every request.
+
+---
+
+## Token introspection mode
+
+Use introspection when your provider issues opaque tokens or when centralized token-state checks are required.
 
 ```yaml
 plugins:
   - name: oidc-role
     config:
-      discovery: "https://<idp-host>/realms/<realm>/.well-known/openid-configuration"
-      client_id: "<client-id>"
-      client_secret: "<client-secret>"
-      bearer_only: "yes"
-      use_jwks: "yes"
-      consumer_claim: "realm_access.roles"
-      consumer_by: "custom_id"
+      auth_mode: introspection
+      discovery: https://keycloak.example.com/realms/example/.well-known/openid-configuration
+      expected_issuer: https://keycloak.example.com/realms/example
+
+      client_id: kong
+      client_secret: ${KONG_OIDC_CLIENT_SECRET}
+
+      introspection_endpoint: >-
+        https://keycloak.example.com/realms/example/
+        protocol/openid-connect/token/introspect
+
+      introspection_endpoint_auth_method: client_secret_post
+      ssl_verify: true
+
+      principal_claim: sub
+      authorization_claims:
+        - realm_access.roles
 ```
 
-### DB-less Kong usage
+Store secrets using environment variables, Docker secrets, Kubernetes Secrets, Vault, or another secret manager.
 
-1. Update `config-example/kong.yml` with your real IdP endpoints and credentials.
-2. Start Kong in DB-less mode.
+---
 
-```bash
-docker compose up --build
+## Authorization-code mode
+
+Authorization-code mode allows Kong-Role to initiate interactive OIDC login.
+
+```yaml
+plugins:
+  - name: oidc-role
+    config:
+      auth_mode: authorization_code
+      discovery: https://keycloak.example.com/realms/example/.well-known/openid-configuration
+      expected_issuer: https://keycloak.example.com/realms/example
+
+      client_id: kong-web
+      client_secret: ${KONG_OIDC_CLIENT_SECRET}
+      session_secret: ${KONG_OIDC_SESSION_SECRET}
+
+      redirect_uri: https://api.example.com/callback
+      scope: openid profile
+      response_type: code
+      unauth_action: auth
+      ssl_verify: true
 ```
 
-### DB-backed Kong usage
+For Backend-for-Frontend systems, it is often preferable for the BFF to perform the browser login and send only the server-held access token to Kong in JWT mode.
 
-Use PostgreSQL-backed Kong and configure resources via Admin API/decK.
+---
 
-High-level steps:
-1. Install plugin on all Kong data-plane nodes.
-2. Enable `oidc-role` in Kong `plugins` list.
-3. Create services/routes/consumers.
-4. Attach `oidc-role` and ACL config via Admin API or declarative sync (decK).
+## Configuration reference
 
-## Docker Usage
+### Authentication and validation
+
+| Setting | Default | Description |
+|---|---:|---|
+| `auth_mode` | `jwt` | `jwt`, `introspection`, or `authorization_code` |
+| `client_id` | required | OIDC client identifier |
+| `client_secret` | unset | Referenceable secret for modes that require it |
+| `discovery` | required | OIDC Discovery endpoint |
+| `expected_issuer` | unset | Exact accepted `iss` value |
+| `allowed_audiences` | `[]` | Accepted `aud` values |
+| `allowed_signing_algorithms` | `["RS256"]` | Accepted JWT signing algorithms |
+| `timeout` | `10000` | Provider request timeout in milliseconds |
+| `ssl_verify` | `true` | Verify provider TLS certificates |
+
+### Identity and authorization
+
+| Setting | Default | Description |
+|---|---:|---|
+| `principal_claim` | `sub` | Required caller identity claim |
+| `username_claim` | `preferred_username` | Human-readable username claim |
+| `authorization_claims` | Keycloak roles and groups | Nested claim paths collected as authorization groups |
+| `require_principal` | `true` | Reject tokens without the configured principal |
+| `require_authorization_claim` | `false` | Reject callers when no authorization group is found |
+
+### Controlled upstream headers
+
+| Setting | Default | Description |
+|---|---:|---|
+| `header_names` | `[]` | Upstream headers controlled by the plugin |
+| `header_claims` | `[]` | Claim path corresponding to each header |
+| `expose_userinfo` | `false` | Forward encoded user information |
+| `expose_id_token` | `false` | Forward an ID token |
+| `expose_access_token` | `false` | Forward an access token |
+
+The plugin clears configured trusted headers before inserting its own values. This prevents clients from spoofing identity headers.
+
+### Legacy Consumer mapping
+
+| Setting | Default | Description |
+|---|---:|---|
+| `legacy_consumer_mapping` | `false` | Enable claim-to-Consumer lookup |
+| `consumer_mapping_required` | `false` | Reject the request when no Consumer matches |
+| `consumer_claim` | `sub` | Claim used for Consumer lookup |
+| `consumer_by` | `custom_id` | Match by `id`, `username`, or `custom_id` |
+
+New deployments should normally use authenticated groups and Kong ACL instead of creating one Consumer for every role.
+
+---
+
+## HTTP responses
+
+| Status | Meaning |
+|---:|---|
+| `401 Unauthorized` | Missing, malformed, expired, inactive, or otherwise invalid token |
+| `403 Forbidden` | Valid identity but missing required authorization claims or Consumer mapping |
+| `500 Internal Server Error` | Plugin configuration or internal processing failure |
+
+Internal error details are not returned to the client.
+
+---
+
+## Testing
+
+Kong-Role v2 includes **37 Busted unit tests** covering:
+
+- nested claim extraction
+- role normalization and deduplication
+- issuer and audience checks
+- JWT validation flows
+- token introspection
+- authorization-code handling
+- invalid or missing bearer tokens
+- inactive tokens
+- session-secret validation
+- request filters
+- custom machine principal claims
+- authenticated-group propagation
+- trusted-header replacement
+- opt-in token forwarding
+- optional and required legacy Consumer mapping
+- correct `401`, `403`, and `500` responses
+
+### Run validation
 
 ```bash
-# build
+make validate
+```
+
+This checks:
+
+- Docker Compose configuration
+- Lua syntax for the plugin source files
+
+### Run unit tests
+
+Install Lua 5.1, Busted, and `lua-cjson`, then run:
+
+```bash
+make test
+```
+
+Or directly:
+
+```bash
+busted --helper=spec/spec_helper.lua --verbose spec
+```
+
+### GitHub Actions
+
+The workflow:
+
+```text
+.github/workflows/plugin-ci.yml
+```
+
+runs:
+
+- Lua 5.1 syntax checks
+- release-file validation
+- the complete Busted unit-test suite
+
+### Kong 3.9.3 end-to-end validation
+
+The plugin has also been tested successfully with **Kong Gateway 3.9.3** using:
+
+- Keycloak 26.2
+- real RS256 access tokens
+- Discovery and JWKS validation
+- multiple Keycloak realm roles
+- Kong authenticated groups
+- Kong ACL route enforcement
+- protected backend services
+- expected `200`, `401`, and `403` responses
+
+A complete integration environment is available in:
+
+**[vtavakkoli/IAM-LAB](https://github.com/vtavakkoli/IAM-LAB)**
+
+Example tested authorization matrix:
+
+| User | LOB-1 | LOB-2 | LOB-3 |
+|---|---:|---:|---:|
+| Alice | `200` | `403` | `403` |
+| Bob | `200` | `200` | `403` |
+| Charlie | `200` | `200` | `200` |
+
+---
+
+## Kong 3.9.3 compatibility
+
+| Component | Version | Status |
+|---|---:|---|
+| Kong Gateway | `3.9.3` | Tested successfully |
+| Plugin | `2.0.0` | Supported |
+| Keycloak | `26.2` | End-to-end tested |
+| Lua | `5.1 / LuaJIT` | Supported by Kong runtime |
+
+Other Kong versions may work, but should be validated in the target environment before production rollout.
+
+---
+
+## Docker image reproducibility
+
+The Docker image uses pinned runtime dependency versions:
+
+- `lua-resty-openidc` `1.8.0`
+- `lua-resty-jwt` `0.2.3`
+- `lua-resty-hmac` `0.06`
+
+The build installs the exact runtime modules required by the plugin instead of relying on mutable LuaRocks mirror resolution.
+
+---
+
+## Repository structure
+
+```text
+.
+├── .github/
+│   └── workflows/
+│       └── plugin-ci.yml
+├── config-example/
+│   └── kong.yml
+├── oidc-role/
+│   ├── filter.lua
+│   ├── handler.lua
+│   ├── schema.lua
+│   ├── session.lua
+│   └── utils.lua
+├── spec/
+│   ├── support/
+│   ├── oidc_role_filter_spec.lua
+│   ├── oidc_role_handler_spec.lua
+│   ├── oidc_role_schema_spec.lua
+│   ├── oidc_role_session_spec.lua
+│   └── oidc_role_utils_spec.lua
+├── CHANGELOG.md
+├── CODE_OF_CONDUCT.md
+├── CONTRIBUTING.md
+├── Dockerfile
+├── LICENSE
+├── Makefile
+├── NOTICE
+├── README.md
+├── SECURITY.md
+├── VERSION
+└── docker-compose.yml
+```
+
+---
+
+## Production security checklist
+
+Before production deployment:
+
+- [ ] Use HTTPS for all identity-provider endpoints.
+- [ ] Keep `ssl_verify: true`.
+- [ ] Configure an exact `expected_issuer`.
+- [ ] Configure the intended `allowed_audiences`.
+- [ ] Restrict accepted signing algorithms.
+- [ ] Use short-lived access tokens.
+- [ ] Store client and session secrets outside source control.
+- [ ] Disable token and user-information forwarding unless explicitly required.
+- [ ] Review every forwarded identity header.
+- [ ] Restrict access to the Kong Admin API.
+- [ ] Apply network policies between Kong and upstream services.
+- [ ] Add rate limiting and abuse protection where required.
+- [ ] Monitor authentication and authorization failures.
+- [ ] Validate the plugin against your exact Kong and IdP versions.
+- [ ] Run dependency and container vulnerability scans.
+- [ ] Perform a threat model and security review.
+
+---
+
+## Important limitations
+
+- The plugin depends on the token structure produced by the configured identity provider.
+- JWT validation does not provide immediate revocation awareness unless token lifetimes are short or introspection is used.
+- Authorization decisions are only as accurate as the configured claim paths and ACL rules.
+- High-availability, proxy, timeout, logging, and observability settings must be adapted to the deployment environment.
+- This project is an open-source reference implementation and must be reviewed before production use.
+
+---
+
+## Development
+
+Useful commands:
+
+```bash
 make build
-
-# run in detached mode
 make up
-
-# inspect logs
+make ps
 make logs
-
-# stop/remove containers
+make validate
+make test
 make down
 ```
 
-By default the compose setup exposes:
-- Proxy: `http://localhost:9180`
-- Admin API: `http://localhost:9181`
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting changes.
 
-## Development Notes
+---
 
-- Keep plugin behavior backwards-compatible unless explicitly versioned.
-- Favor small, targeted changes in Lua handlers.
-- Use placeholders for demo configuration values (never real secrets).
-- Run `make validate` before committing docs/config updates.
+## Security reporting
 
-## Testing (Practical Approach)
+Do not publish suspected vulnerabilities in a public issue.
 
-No automated unit test suite is currently bundled with runtime dependencies in this repository.
+Follow the guidance in [SECURITY.md](SECURITY.md) and include:
 
-Recommended validation path:
-1. Static/config checks (`make validate`),
-2. Launch demo (`make up`),
-3. Verify unauthorized and authorized request behavior with curl.
+- affected version or commit
+- reproduction steps
+- expected and actual behavior
+- security impact
+- suggested remediation, when available
 
-### Sample curl checks
+---
 
-Unauthorized (missing/invalid token):
+## Roadmap
 
-```bash
-curl -i http://localhost:9180/lob1
-```
+Planned improvements include:
 
-Authorized (valid token placeholder):
+- a broader Kong compatibility matrix
+- automated container integration tests
+- SBOM generation and container scanning
+- dependency checksum verification
+- structured security and authorization metrics
+- additional policy examples
+- Kubernetes and OpenShift deployment examples
 
-```bash
-curl -i \
-  -H "Authorization: Bearer <VALID_ACCESS_TOKEN>" \
-  http://localhost:9180/lob1
-```
+---
 
-> Replace `<VALID_ACCESS_TOKEN>` with a real token from your identity provider.
+## Related project
 
-## Limitations
+### IAM-LAB
 
-- This repository is primarily a reference implementation and demo packaging.
-- Behavior depends on correct token/claim structure from your IdP.
-- Production-hardening (timeouts, retries, observability, policy rules) should be tailored to your environment.
+The companion repository demonstrates a complete end-to-end environment with:
 
-## Security Considerations
+- Keycloak
+- OpenLDAP
+- Kong Gateway
+- Kong-Role
+- .NET Backend-for-Frontend applications
+- protected LOB services
+- automated authorization scenarios
 
-- **Do not store client secrets in plain text** in version-controlled config files.
-- Use environment variables, Docker secrets, or a secret manager.
-- Treat `config-example/kong.yml` values as **placeholders only**.
-- Validate TLS settings and avoid insecure `ssl_verify` behavior in production.
-- Review and threat-model this plugin before production deployment.
+Repository:
 
-See `SECURITY.md` for reporting guidance and deployment recommendations.
+**https://github.com/vtavakkoli/IAM-LAB**
 
-## Roadmap / Future Improvements
+---
 
-- Add automated plugin tests (busted/spec + CI workflow).
-- Add compatibility matrix for Kong versions.
-- Add examples for claim-based role matching policies beyond consumer mapping.
-- Improve structured logging and operational metrics.
+## Author
 
-## Author and License
+**Dr. Vahid Tavakkoli**
 
-- **Author:** Vahid Tavakkoli (2026)
-- **License:** MIT (see `LICENSE`)
-- Additional attribution details: see `NOTICE`
+Created and maintained in 2026.
+
+---
+
+## License
+
+Licensed under the [MIT License](LICENSE).
+
+See [NOTICE](NOTICE) for additional attribution information.
+
+---
+
+Have fun testing Kong-Role, experimenting with authorization policies, and building new secure systems. 🚀
