@@ -3,326 +3,98 @@ local typedefs = require "kong.db.schema.typedefs"
 return {
   name = "oidc-role",
   fields = {
-    {
-      -- this plugin will only be applied to Services or Routes
-      consumer = typedefs.no_consumer
-    },
-    {
-      -- this plugin will only run within Nginx HTTP module
-      protocols = typedefs.protocols_http
-    },
+    { consumer = typedefs.no_consumer },
+    { protocols = typedefs.protocols_http },
     {
       config = {
         type = "record",
         fields = {
-          {
-            client_id = {
+          { auth_mode = {
               type = "string",
-              required = true
-            }
-          },
-          {
-            client_secret = {
-              type = "string",
-              required = true
-            }
-          },
-          {
-            discovery = {
-              type = "string",
-              required = true,
-              default = "https://.well-known/openid-configuration"
-            }
-          },
-          {
-            introspection_endpoint = {
-              type = "string",
-              required = false
-            }
-          },
-          {
-            introspection_endpoint_auth_method = {
-              type = "string",
-              required = false
-            }
-          },
-          {
-            introspection_cache_ignore = {
-              type = "string",
-              required = true,
-              default = "no"
-            }
-          },
-          {
-            timeout = {
-              type = "number",
-              required = false
-            }
-          },
-          {
-            bearer_only = {
-              type = "string",
-              required = true,
-              default = "no"
-            }
-          },
-          {
-            realm = {
-              type = "string",
-              required = true,
-              default = "kong"
-            }
-          },
-          {
-            redirect_uri = {
-              type = "string"
-            }
-          },
-          {
-            scope = {
-              type = "string",
-              required = true,
-              default = "openid"
-            }
-          },
-          {
-            validate_scope = {
-              type = "string",
-              required = true,
-              default = "no"
-            }
-          },
-          {
-            response_type = {
-              type = "string",
-              required = true,
-              default = "code"
-            }
-          },
-          {
-            ssl_verify = {
-              type = "string",
-              required = true,
-              default = "no"
-            }
-          },
-          {
-            use_jwks = {
-              type = "string",
-              required = true,
-              default = "no"
-            }
-          },
-          {
-            token_endpoint_auth_method = {
-              type = "string",
-              required = true,
-              default = "client_secret_post"
-            }
-          },
-          {
-            session_secret = {
-              type = "string",
-              required = false
-            }
-          },
-          {
-            recovery_page_path = {
-              type = "string"
-            }
-          },
-          {
-            logout_path = {
-              type = "string",
-              required = false,
-              default = "/logout"
-            }
-          },
-          {
-            redirect_after_logout_uri = {
-              type = "string",
-              required = false,
-              default = "/"
-            }
-          },
-          {
-            redirect_after_logout_with_id_token_hint = {
-              type = "string",
-              required = false,
-              default = "no"
-            }
-          },
-          {
-            post_logout_redirect_uri = {
-              type = "string",
-              required = false
-            }
-          },
-          {
-            unauth_action = {
-              type = "string",
-              required = false,
-              default = "auth"
-            }
-          },
-          {
-            filters = {
-              type = "string"
-            }
-          },
-          {
-            ignore_auth_filters = {
-              type = "string",
-              required = false
-            }
-          },
-          {
-            userinfo_header_name = {
-              type = "string",
-              required = false,
-              default = "X-USERINFO"
-            }
-          },
-          {
-            id_token_header_name = {
-              type = "string",
-              required = false,
-              default = "X-ID-Token"
-            }
-          },
-          {
-            access_token_header_name = {
-              type = "string",
-              required = false,
-              default = "X-Access-Token"
-            }
-          },
-          {
-            access_token_as_bearer = {
-              type = "string",
-              required = false,
-              default = "no"
-            }
-          },
-          {
-            disable_userinfo_header = {
-              type = "string",
-              required = false,
-              default = "no"
-            }
-          },
-          {
-            disable_id_token_header = {
-              type = "string",
-              required = false,
-              default = "no"
-            }
-          },
-          {
-            disable_access_token_header = {
-              type = "string",
-              required = false,
-              default = "no"
-            }
-          },
-          {
-            revoke_tokens_on_logout = {
-              type = "string",
-              required = false,
-              default = "no"
-            }
-          },
-          {
-            groups_claim = {
-              type = "string",
-              required = false,
-              default = "groups"
-            }
-          },
-          {
-            consumer_claim = {
-              type = "string",
-              required = false,
-              default = "sub"
-            },
-          },
-          {
-            consumer_by = {
-              type = "string",
-              required = false,
-              default = "custom_id",
+              default = "jwt",
+              one_of = { "jwt", "introspection", "authorization_code" },
+          }},
+          { client_id = { type = "string", required = true } },
+          { client_secret = { type = "string", required = false, referenceable = true } },
+          { discovery = { type = "string", required = true } },
+          { expected_issuer = { type = "string", required = false } },
+          { allowed_audiences = {
+              type = "array", required = false,
+              elements = { type = "string" }, default = {},
+          }},
+          { allowed_signing_algorithms = {
+              type = "array", required = true,
+              elements = { type = "string" }, default = { "RS256" },
+          }},
+          { introspection_endpoint = { type = "string", required = false } },
+          { introspection_endpoint_auth_method = { type = "string", required = false } },
+          { timeout = { type = "number", default = 10000 } },
+          { ssl_verify = { type = "boolean", default = true } },
+          { redirect_uri = { type = "string", required = false } },
+          { scope = { type = "string", default = "openid" } },
+          { response_type = { type = "string", default = "code" } },
+          { unauth_action = {
+              type = "string", default = "deny", one_of = { "deny", "auth" },
+          }},
+          { session_secret = { type = "string", required = false, referenceable = true } },
+
+          { principal_claim = { type = "string", default = "sub" } },
+          { username_claim = { type = "string", default = "preferred_username" } },
+          { authorization_claims = {
+              type = "array", required = true,
+              elements = { type = "string" },
+              default = { "resource_access.kong.roles", "realm_access.roles", "groups" },
+          }},
+          { require_principal = { type = "boolean", default = true } },
+          { require_authorization_claim = { type = "boolean", default = false } },
+
+          { legacy_consumer_mapping = { type = "boolean", default = false } },
+          { consumer_mapping_required = { type = "boolean", default = false } },
+          { consumer_claim = { type = "string", default = "sub" } },
+          { consumer_by = {
+              type = "string", default = "custom_id",
               one_of = { "id", "username", "custom_id" },
+          }},
+
+          { skip_already_auth_requests = { type = "boolean", default = false } },
+          { expose_userinfo = { type = "boolean", default = false } },
+          { expose_id_token = { type = "boolean", default = false } },
+          { expose_access_token = { type = "boolean", default = false } },
+          { userinfo_header_name = { type = "string", default = "X-UserInfo" } },
+          { id_token_header_name = { type = "string", default = "X-ID-Token" } },
+          { access_token_header_name = { type = "string", default = "X-Access-Token" } },
+          { header_names = {
+              type = "array", required = true,
+              elements = { type = "string" }, default = {},
+          }},
+          { header_claims = {
+              type = "array", required = true,
+              elements = { type = "string" }, default = {},
+          }},
+          { filters = { type = "string", required = false } },
+          { ignore_auth_filters = { type = "string", required = false } },
+          { http_proxy = { type = "string", required = false } },
+          { https_proxy = { type = "string", required = false } },
+        },
+        entity_checks = {
+          {
+            conditional = {
+              if_field = "auth_mode",
+              if_match = { eq = "introspection" },
+              then_field = "introspection_endpoint",
+              then_match = { required = true },
             },
           },
           {
-            skip_already_auth_requests = {
-              type = "string",
-              required = false,
-              default = "no"
-            }
+            conditional = {
+              if_field = "auth_mode",
+              if_match = { eq = "authorization_code" },
+              then_field = "client_secret",
+              then_match = { required = true },
+            },
           },
-          {
-            bearer_jwt_auth_enable = {
-              type = "string",
-              required = false,
-              default = "no"
-            }
-          },
-          {
-            bearer_jwt_auth_allowed_auds = {
-              type = "array",
-              required = false,
-              elements = {
-                type = "string"
-              },
-            }
-          },
-          {
-            bearer_jwt_auth_signing_algs = {
-              type = "array",
-              required = true,
-              elements = {
-                type = "string"
-              },
-              default = {
-                "RS256"
-              }
-            }
-          },
-          {
-            header_names = {
-              type = "array",
-              required = true,
-              elements = {
-                type = "string"
-              },
-              default = {}
-            }
-          },
-          {
-            header_claims = {
-              type = "array",
-              required = true,
-              elements = {
-                type = "string"
-              },
-              default = {}
-            }
-          },
-          {
-            http_proxy = {
-              type = "string",
-              required = false
-            }
-          },
-          {
-            https_proxy = {
-              type = "string",
-              required = false
-            }
-          }
-        }
-      }
-    }
-  }
+        },
+      },
+    },
+  },
 }
