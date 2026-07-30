@@ -1,0 +1,28 @@
+name: plugin-ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Lua
+        run: sudo apt-get update && sudo apt-get install -y lua5.1
+      - name: Parse Lua sources
+        run: |
+          luac5.1 -p oidc-role/handler.lua
+          luac5.1 -p oidc-role/utils.lua
+          luac5.1 -p oidc-role/filter.lua
+          luac5.1 -p oidc-role/session.lua
+          luac5.1 -p oidc-role/schema.lua
+      - name: Validate release files
+        run: |
+          test "$(cat VERSION)" = "2.0.0"
+          grep -q "ssl_verify: true" config-example/kong.yml
